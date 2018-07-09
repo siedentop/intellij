@@ -13,9 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.idea.sdkcompat.cidr;
+package com.google.idea.blaze.base.lang.buildfile.formatting;
 
-import com.jetbrains.cidr.lang.workspace.OCWorkspace;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CustomCodeStyleSettings;
 
-/** Adapter to bridge different SDK versions. */
-public abstract class OCWorkspaceAdapter implements OCWorkspace {}
+/**
+ * BUILD/Skylark-specific code style settings.
+ *
+ * <p>#api173: use IndentOptions#DECLARATION_PARAMETER_INDENT directly.
+ */
+public class BuildCodeStyleSettings extends CustomCodeStyleSettings {
+
+  public int declarationParameterIndent = 8;
+
+  BuildCodeStyleSettings(CodeStyleSettings container) {
+    super("BuildCodeStyleSettings", container);
+  }
+}

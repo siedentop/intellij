@@ -19,6 +19,7 @@ import static com.google.common.base.Preconditions.checkState;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.ContinueExecutionRequest;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.DebugEvent;
@@ -28,6 +29,7 @@ import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.Eva
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.Location;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.PauseReason;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.PauseThreadRequest;
+import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.PausedThread;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.SetBreakpointsRequest;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.StartDebuggingRequest;
 import com.google.devtools.build.lib.skylarkdebugging.SkylarkDebuggingProtos.Stepping;
@@ -77,7 +79,7 @@ public class SkylarkDebugProcess extends XDebugProcess {
   // state shared with debug server
   private final ConcurrentMap<Location, XLineBreakpoint<XBreakpointProperties>> lineBreakpoints =
       new ConcurrentHashMap<>();
-  private final ConcurrentMap<Long, ThreadInfo> threads = new ConcurrentHashMap<>();
+  private final ConcurrentMap<Long, PausedThreadState> pausedThreads = new ConcurrentHashMap<>();
   // the currently-stepping thread gets priority in the UI -- we always grab focus when it's paused
   private volatile long currentlySteppingThreadId = 0;
 
@@ -90,8 +92,8 @@ public class SkylarkDebugProcess extends XDebugProcess {
     session.setPauseActionSupported(true);
   }
 
-  Collection<ThreadInfo> getThreads() {
-    return ImmutableList.copyOf(threads.values());
+  Collection<PausedThreadState> getPausedThreads() {
+    return ImmutableList.copyOf(pausedThreads.values());
   }
 
   @Override
@@ -273,9 +275,7 @@ public class SkylarkDebugProcess extends XDebugProcess {
   }
 
   private void scheduleWakeupIfNecessary(int delayMillis) {
-    long pausedThreadCount =
-        threads.values().stream().filter(t -> t.getPausedState() != null).count();
-    if (pausedThreadCount < 2) {
+    if (pausedThreads.size() < 2) {
       // if no other threads are paused, the UI state will already be up-to-date
       return;
     }
@@ -322,16 +322,16 @@ public class SkylarkDebugProcess extends XDebugProcess {
    */
   void evaluate(String expression, XEvaluationCallback callback) {
     try {
-      evaluate(currentFrame().threadId, expression, callback);
+      evaluate(currentFrame(), expression, callback);
     } catch (SkylarkDebuggerException e) {
       callback.errorOccurred(e.getMessage());
     }
   }
 
-  private void evaluate(long threadId, String expression, XEvaluationCallback callback) {
+  private void evaluate(SkylarkStackFrame frame, String expression, XEvaluationCallback callback) {
     EvaluateRequest request =
-        EvaluateRequest.newBuilder().setThreadId(threadId).setExpression(expression).build();
-    doEvaluate(request, callback);
+        EvaluateRequest.newBuilder().setThreadId(frame.threadId).setStatement(expression).build();
+    doEvaluate(request, frame, callback);
   }
 
   private SkylarkStackFrame currentFrame() throws SkylarkDebuggerException {
@@ -346,7 +346,8 @@ public class SkylarkDebugProcess extends XDebugProcess {
     return frame;
   }
 
-  private void doEvaluate(EvaluateRequest request, XEvaluationCallback callback) {
+  private void doEvaluate(
+      EvaluateRequest request, SkylarkStackFrame frame, XEvaluationCallback callback) {
     DebugEvent response = transport.sendRequest(DebugRequest.newBuilder().setEvaluate(request));
     if (response == null) {
       callback.errorOccurred("No response from the Skylark debugger");
@@ -357,7 +358,17 @@ public class SkylarkDebugProcess extends XDebugProcess {
       return;
     }
     checkState(response.getPayloadCase() == PayloadCase.EVALUATE);
-    callback.evaluated(SkylarkDebugValue.fromProto(response.getEvaluate().getResult()));
+    callback.evaluated(SkylarkDebugValue.fromProto(frame, response.getEvaluate().getResult()));
+  }
+
+  @Nullable
+  List<SkylarkDebuggingProtos.Value> getChildren(
+      long threadId, SkylarkDebuggingProtos.Value value) {
+    PausedThreadState threadState = pausedThreads.get(threadId);
+    if (threadState == null) {
+      return null;
+    }
+    return threadState.childCache.getChildren(transport, value);
   }
 
   void listFrames(long threadId, XExecutionStack.XStackFrameContainer container) {
@@ -393,8 +404,7 @@ public class SkylarkDebugProcess extends XDebugProcess {
         handleThreadPausedEvent(event.getThreadPaused().getThread());
         return;
       case THREAD_CONTINUED:
-        // TODO(brendandouglas): retain/cache stack information while stepping?
-        threads.remove(event.getThreadContinued().getThreadId());
+        pausedThreads.remove(event.getThreadContinued().getThreadId());
         return;
       case LIST_FRAMES:
       case EVALUATE:
@@ -402,6 +412,7 @@ public class SkylarkDebugProcess extends XDebugProcess {
       case CONTINUE_EXECUTION:
       case START_DEBUGGING:
       case PAUSE_THREAD:
+      case GET_CHILDREN:
         logger.error("Can't handle a response event without the associated request");
         return;
       case PAYLOAD_NOT_SET:
@@ -425,49 +436,42 @@ public class SkylarkDebugProcess extends XDebugProcess {
       // we already have an active thread
       return;
     }
-    getThreads()
-        .stream()
-        .filter(t -> t.getPausedState() != null)
-        .findFirst()
-        .ifPresent(t -> notifyThreadPaused(t, true));
+    PausedThreadState state = Iterables.getFirst(getPausedThreads(), null);
+    if (state != null) {
+      notifyThreadPaused(state, true);
+    }
   }
 
-  private ThreadInfo toThreadInfo(SkylarkDebuggingProtos.PausedThread thread) {
-    return new ThreadInfo(thread.getId(), thread.getName(), thread);
-  }
-
-  private ThreadInfo addOrUpdateThread(SkylarkDebuggingProtos.PausedThread thread) {
-    ThreadInfo info = threads.computeIfAbsent(thread.getId(), id -> toThreadInfo(thread));
-    info.updatePausedState(thread);
-    return info;
-  }
-
-  private void handleThreadPausedEvent(SkylarkDebuggingProtos.PausedThread thread) {
+  private void handleThreadPausedEvent(PausedThread thread) {
     if (thread.getPauseReason() != PauseReason.CONDITIONAL_BREAKPOINT_ERROR) {
-      notifyThreadPaused(addOrUpdateThread(thread), false);
+      notifyThreadPaused(thread, false);
       return;
     }
     XLineBreakpoint<XBreakpointProperties> breakpoint =
         lineBreakpoints.get(thread.getLocation().toBuilder().setColumnNumber(0).build());
     if (breakpoint == null) {
-      notifyThreadPaused(addOrUpdateThread(thread), false);
+      notifyThreadPaused(thread, false);
     } else {
       handleConditionalBreakpointError(breakpoint, thread);
     }
   }
 
-  private void notifyThreadPaused(ThreadInfo info, boolean alwaysNotify) {
-    SkylarkDebuggingProtos.PausedThread pausedState =
-        Preconditions.checkNotNull(info.getPausedState());
+  private void notifyThreadPaused(PausedThread thread, boolean alwaysNotify) {
+    notifyThreadPaused(new PausedThreadState(thread), alwaysNotify);
+  }
+
+  private void notifyThreadPaused(PausedThreadState threadState, boolean alwaysNotify) {
+    pausedThreads.put(threadState.thread.getId(), threadState);
     XLineBreakpoint<XBreakpointProperties> breakpoint =
-        lineBreakpoints.get(pausedState.getLocation().toBuilder().setColumnNumber(0).build());
-    SkylarkSuspendContext suspendContext = new SkylarkSuspendContext(this, info);
+        lineBreakpoints.get(
+            threadState.thread.getLocation().toBuilder().setColumnNumber(0).build());
+    SkylarkSuspendContext suspendContext = new SkylarkSuspendContext(this, threadState);
     if (breakpoint != null) {
       getSession().breakpointReached(breakpoint, null, suspendContext);
     } else if (alwaysNotify
-        || info.id == currentlySteppingThreadId
+        || threadState.thread.getId() == currentlySteppingThreadId
         || !getSession().isSuspended()
-        || individualThreadPausedByUser(pausedState.getPauseReason())) {
+        || individualThreadPausedByUser(threadState.thread.getPauseReason())) {
       getSession().positionReached(suspendContext);
     }
   }
@@ -491,8 +495,7 @@ public class SkylarkDebugProcess extends XDebugProcess {
   }
 
   private void handleConditionalBreakpointError(
-      XLineBreakpoint<XBreakpointProperties> breakpoint,
-      SkylarkDebuggingProtos.PausedThread thread) {
+      XLineBreakpoint<XBreakpointProperties> breakpoint, PausedThread thread) {
     // TODO(brendandouglas): also navigate to the problematic breakpoint
     String error = Preconditions.checkNotNull(thread.getConditionalBreakpointError().getMessage());
     String title = "Breakpoint Condition Error";
@@ -508,7 +511,7 @@ public class SkylarkDebugProcess extends XDebugProcess {
                     Messages.showYesNoDialog(project, message, title, Messages.getQuestionIcon())
                         == Messages.YES));
     if (stop.get()) {
-      notifyThreadPaused(addOrUpdateThread(thread), false);
+      notifyThreadPaused(thread, false);
       return;
     }
     // else resume the thread

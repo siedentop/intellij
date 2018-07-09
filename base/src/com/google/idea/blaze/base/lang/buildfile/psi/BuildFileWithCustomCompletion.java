@@ -13,9 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.idea.sdkcompat.cidr;
+package com.google.idea.blaze.base.lang.buildfile.psi;
 
-import com.jetbrains.cidr.lang.workspace.OCWorkspace;
+import com.intellij.psi.PsiFile;
 
-/** Adapter to bridge different SDK versions. */
-public abstract class OCWorkspaceAdapter implements OCWorkspace {}
+/**
+ * An interface denoting a {@link BuildFile} with custom completion context. The standard completion
+ * providers will be disabled for instances of this class.
+ */
+public interface BuildFileWithCustomCompletion extends PsiFile {}

@@ -18,6 +18,7 @@ load(
     "intellij_plugin_debug_target",
 )
 load("//:version.bzl", "VERSION")
+load("//intellij_platform_sdk:build_defs.bzl", "select_for_plugin_api")
 load(
     "//testing:test_defs.bzl",
     "intellij_integration_test_suite",
@@ -33,7 +34,10 @@ merged_plugin_xml(
         "//java:plugin_xml",
         "//kotlin:plugin_xml",
         "//python:plugin_xml",
-    ],
+    ] + select_for_plugin_api({
+        "android-studio-3.0": ["src/META-INF/aswb_3_0.xml"],
+        "android-studio-3.2": ["src/META-INF/aswb_3_2.xml"],
+    }),
 )
 
 optional_plugin_xml(
@@ -79,7 +83,10 @@ stamped_plugin_xml(
 
 java_library(
     name = "aswb_lib",
-    srcs = glob(["src/**/*.java"]),
+    srcs = glob(["src/**/*.java"]) + select_for_plugin_api({
+        "android-studio-3.0": glob(["src_3_0/**/*.java"]),
+        "android-studio-3.2": glob(["src_3_2/**/*.java"]),
+    }),
     resources = glob(["resources/**/*"]),
     runtime_deps = [
         "//dart",
@@ -111,7 +118,10 @@ java_library(
 
 intellij_unit_test_suite(
     name = "unit_tests",
-    srcs = glob(["tests/unittests/**/*.java"]),
+    srcs = glob(["tests/unittests/**/*.java"]) + select_for_plugin_api({
+        "android-studio-3.0": glob(["tests/unittests_3_0/**/*.java"]),
+        "android-studio-3.2": glob(["tests/unittests_3_2/**/*.java"]),
+    }),
     test_package_root = "com.google.idea.blaze.android",
     deps = [
         ":aswb_lib",

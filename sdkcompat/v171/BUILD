@@ -21,6 +21,7 @@ java_library(
             "com/google/idea/sdkcompat/cidr/**",
             "com/google/idea/sdkcompat/java/**",
             "com/google/idea/sdkcompat/kotlin/**",
+            "studio/**",
         ]),
         clion = glob([
             "com/google/idea/sdkcompat/cidr/**",

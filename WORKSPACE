@@ -27,7 +27,7 @@ new_http_archive(
 # integration tests.
 new_http_archive(
     name = "intellij_ue_2018_1",
-    build_file = "@//intellij_platform_sdk:BUILD.idea",
+    build_file = "@//intellij_platform_sdk:BUILD.ue",
     sha256 = "4c5dbae40f0f045bcfa1c17c579c0d8cd8fb1823117a49a16ddd23249b078154",
     url = "https://download.jetbrains.com/idea/ideaIU-2018.1.3.tar.gz",
 )
@@ -36,7 +36,7 @@ new_http_archive(
 # integration tests.
 new_http_archive(
     name = "intellij_ue_2018_2",
-    build_file = "@//intellij_platform_sdk:BUILD.idea",
+    build_file = "@//intellij_platform_sdk:BUILD.ue",
     sha256 = "3ebf71ff818f907aef182636adad970378baee3c82d252ba4990180dc8d6f88e",
     url = "https://download.jetbrains.com/idea/ideaIU-182.2949.4.tar.gz",
 )
@@ -122,13 +122,6 @@ new_http_archive(
     ]),
     sha256 = "76b052473be73a68ab6ea80b81ba47dcab0412da3f213a9d22e703e49ff7a39a",
     url = "https://plugins.jetbrains.com/files/1347/44474/scala-intellij-bin-2018.1.8.zip",
-)
-
-new_http_archive(
-    name = "android_studio_3_1",
-    build_file = "@//intellij_platform_sdk:BUILD.android_studio",
-    sha256 = "e2780a02bc50f9e9fa824bf7262ae72b7277ede776379f636ef36c0ecbdbe066",
-    url = "https://dl.google.com/dl/android/studio/ide-zips/3.1.0.12/android-studio-ide-173.4615496-linux.zip",
 )
 
 new_http_archive(

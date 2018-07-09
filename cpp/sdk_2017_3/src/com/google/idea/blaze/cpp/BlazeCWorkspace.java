@@ -22,7 +22,6 @@ import com.google.idea.blaze.base.model.BlazeProjectData;
 import com.google.idea.blaze.base.model.primitives.WorkspaceRoot;
 import com.google.idea.blaze.base.projectview.ProjectViewSet;
 import com.google.idea.blaze.base.scope.BlazeContext;
-import com.google.idea.sdkcompat.cidr.OCWorkspaceAdapter;
 import com.intellij.openapi.application.TransactionGuard;
 import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -39,7 +38,7 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 /** Main entry point for C/CPP configuration data. */
-public final class BlazeCWorkspace extends OCWorkspaceAdapter implements ProjectComponent {
+public final class BlazeCWorkspace implements OCWorkspace, ProjectComponent {
   private final BlazeConfigurationResolver configurationResolver;
   private BlazeConfigurationResolverResult resolverResult;
   private final Project project;
